@@ -14,8 +14,8 @@ using std::complex;
 
 void initialize_BRIR(AudioData& data, const BRIR& brir, const vector<int>& block_sizes) {
     // Clear stereo output buffers and prepare for stereo playback
-    data.left = vector<float>(data.mono.size(), 0.0f);
-    data.right = vector<float>(data.mono.size(), 0.0f);
+    data.left = vector<float>(data.mono.size() + 2*block_sizes.back(), 0.0f);
+    data.right = vector<float>(data.mono.size() + 2*block_sizes.back(), 0.0f);
     data.use_mono = false;
     data.playhead = 0;
 
@@ -25,7 +25,7 @@ void initialize_BRIR(AudioData& data, const BRIR& brir, const vector<int>& block
     data.brir = brir;
 
     // Each stage has its own history buffers, overlap buffers, and FFT plans based on its block size
-    int stages = data.block_sizes.size();
+    int stages = data.brir.left.stages.size();
     for (int s = 0; s < stages; ++s) {
         const auto& stage = data.brir.left.stages[s];
         StageData sd;
@@ -35,33 +35,23 @@ void initialize_BRIR(AudioData& data, const BRIR& brir, const vector<int>& block
         sd.bins = stage.bins;
         sd.num_partitions = stage.num_partitions;
 
-        sd.period = stage.block_size / data.block_sizes[0]; // How many of the smallest blocks fit into this stage's block size
+        sd.x = fftwf_alloc_real(sd.fft_size);
+        sd.X = fftwf_alloc_complex(sd.bins);
 
-        sd.fft_input.resize(sd.fft_size);
-        sd.ifft_output.resize(sd.fft_size);
+        sd.Y_left = fftwf_alloc_complex(sd.bins);
+        sd.Y_right = fftwf_alloc_complex(sd.bins);
 
-        sd.Y_left.resize(sd.bins);
-        sd.Y_right.resize(sd.bins);
-
-        sd.overlap_left.resize(sd.block_size);
-        sd.overlap_right.resize(sd.block_size);
+        sd.overlap_left = fftwf_alloc_real(sd.fft_size);
+        sd.overlap_right = fftwf_alloc_real(sd.fft_size);
 
         sd.X_history.resize(sd.num_partitions);
         for (auto& h : sd.X_history) h.resize(sd.bins);
 
-        sd.fft_plan = fftwf_plan_dft_r2c_1d(
-            sd.fft_size,
-            sd.fft_input.data(),
-            reinterpret_cast<fftwf_complex*>(sd.Y_left.data()),
-            FFTW_MEASURE);
+        sd.fft_plan = fftwf_plan_dft_r2c_1d(sd.fft_size, sd.x, sd.X, FFTW_MEASURE);
+        sd.ifft_plan_left = fftwf_plan_dft_c2r_1d(sd.fft_size, sd.Y_left, sd.overlap_left, FFTW_MEASURE);
+        sd.ifft_plan_right = fftwf_plan_dft_c2r_1d(sd.fft_size, sd.Y_right, sd.overlap_right, FFTW_MEASURE);
 
-        sd.ifft_plan = fftwf_plan_dft_c2r_1d(
-            sd.fft_size,
-            reinterpret_cast<fftwf_complex*>(sd.Y_left.data()),
-            sd.ifft_output.data(),
-            FFTW_MEASURE);
-
-        data.stages.push_back(sd);
+        data.stages.emplace_back(sd);
     }
 }
 
@@ -101,7 +91,7 @@ int main(int argc, char* argv[]) {
     initialize_BRIR(audio_data, brir, block_sizes);
 
     // Apply the BRIR to the input audio file
-    std::cout << "Applying BRIR to audio in real-time...\n";
+    std::cout << "Applying BRIR to audio in real-time..." << std::endl;
     play_audio(audio_data);
     std::cout << "Finished playing binaural audio.\n\n";
 

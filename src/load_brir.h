@@ -13,7 +13,7 @@ struct StageInfo {
 };
 
 struct PartitionedIR {
-    std::vector<Stage> stages;
+    std::vector<StageInfo> stages;
 };
 
 struct BRIR {

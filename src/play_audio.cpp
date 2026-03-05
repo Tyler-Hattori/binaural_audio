@@ -5,6 +5,7 @@
 #include <iostream>
 
 using std::vector;
+using std::complex;
 
 int audio_callback(void *output_buffer, void *input_buffer, unsigned int buffer_size,
                     double stream_time, RtAudioStreamStatus status, void *user_data) {
@@ -21,89 +22,67 @@ int audio_callback(void *output_buffer, void *input_buffer, unsigned int buffer_
     size_t remaining = data->mono.size() - data->playhead;
     size_t to_process = (buffer_size < remaining) ? buffer_size : remaining;
 
+    // Process BRIR convolution if enabled
     if (data->apply_brir) {
         for (size_t s = 0; s < data->stages.size(); ++s) {
             auto& stage_info = data->brir.left.stages[s];
             auto& stage_data = data->stages[s];
 
+            // Copy the current block of audio into the stage's input buffer
+            int sc = stage_data.sample_counter;
+            memcpy(stage_data.x + sc, &data->mono[data->playhead], to_process * sizeof(float));
+
             // Only process this stage if block_size samples have been accumulated
-            if (stage_data.counter != 0) {
-                stage_data.counter = (stage_data.counter + 1) % stage_data.period;
-                continue;
-            }
-            stage_data.counter = (stage_data.counter + 1) % stage_data.period;
+            stage_data.sample_counter = (stage_data.sample_counter + buffer_size) % stage_data.block_size;
+            if (stage_data.sample_counter != 0) continue;
 
-            int B = stage_info.block_size;
-            int N = stage_info.fft_size;
-            int bins = stage_info.bins;
-            int P = stage_info.num_partitions;
+            // Zero-pad and FFT
+            memset(stage_data.x + stage_data.block_size, 0, stage_data.block_size * sizeof(float));
+            fftwf_execute(stage_data.fft_plan);
 
-            // 1️⃣ Copy input block
-            std::fill(stage_data.time_buffer.begin(), stage_data.time_buffer.end(), 0.0f);
+            // For the complex multiplication, cast to std::complex for easy math:
+            auto* X = reinterpret_cast<std::complex<float>*>(stage_data.X);
 
-            for (size_t i = 0; i < to_process; ++i)
-                stage_data.time_buffer[i] = data->mono[data->playhead + i];
+            // Store into circular FDL
+            int bins = stage_data.bins;
+            std::rotate(stage_data.X_history.rbegin(), stage_data.X_history.rbegin() + 1, stage_data.X_history.rend());
+            std::copy(X, X + bins, stage_data.X_history[0].begin());
 
-            // 2️⃣ FFT
-            fftwf_execute(stage_data.forward_plan);
-
-            // 3️⃣ Store into circular FDL
-            stage_data.X_history[stage_data.write_index] =
-                std::vector<std::complex<float>>(
-                    reinterpret_cast<std::complex<float>*>(stage_data.time_buffer.data()),
-                    reinterpret_cast<std::complex<float>*>(stage_data.time_buffer.data()) + bins);
-
-            // 4️⃣ Clear accumulators
-            std::fill(stage_data.Y_left.begin(), stage_data.Y_left.end(), {0,0});
-            std::fill(stage_data.Y_right.begin(), stage_data.Y_right.end(), {0,0});
-
-            // 5️⃣ Convolution sum
-            for (int p = 0; p < P; ++p)
-            {
-                int read_index = (stage_data.write_index - p + P) % P;
-
-                for (int k = 0; k < bins; ++k)
-                {
-                    stage_data.Y_left[k]  += stage_info.H[p][k] * stage_data.X_history[read_index][k];
-                    stage_data.Y_right[k] += data->brir.right.stages[s].H[p][k] *
-                                    stage_data.X_history[read_index][k];
+            // Convolution sum in frequency domain
+            auto* Y_left = reinterpret_cast<std::complex<float>*>(stage_data.Y_left);
+            auto* Y_right = reinterpret_cast<std::complex<float>*>(stage_data.Y_right);
+            memset(stage_data.Y_left, 0, bins * sizeof(std::complex<float>));
+            memset(stage_data.Y_right, 0, bins * sizeof(std::complex<float>));
+            for (int p = 0; p < stage_data.num_partitions; ++p) {
+                for (int k = 0; k < bins; ++k) {
+                    Y_left[k]  += data->brir.left.stages[s].H[p][k] * stage_data.X_history[p][k];
+                    Y_right[k] += data->brir.right.stages[s].H[p][k] * stage_data.X_history[p][k];
                 }
             }
 
-            // 6️⃣ Inverse FFT (Left)
-            fftwf_execute(stage_data.inverse_plan);
+            // Inverse FFT
+            fftwf_execute(stage_data.ifft_plan_left);
+            fftwf_execute(stage_data.ifft_plan_right);
 
-            for (int i = 0; i < B; ++i)
-            {
-                float sample = stage_data.time_buffer[i] / N;
-                sample += stage_data.overlap_left[i];
-                out[2*i] += sample;
-                stage_data.overlap_left[i] = stage_data.time_buffer[i + B] / N;
+            // Overlap-add output to final stereo buffers
+            int N = stage_data.fft_size;
+            for (int n = 0; n < N; ++n) {
+                if (data->playhead + n < data->left.size()) {
+                    data->left[data->playhead + n] += stage_data.overlap_left[n] / N; // Normalize by fft_size
+                    data->right[data->playhead + n] += stage_data.overlap_right[n] / N;
+                }
             }
-
-            // 7️⃣ Inverse FFT (Right)
-            fftwf_execute(stage_data.inverse_plan);
-
-            for (int i = 0; i < B; ++i)
-            {
-                float sample = stage_data.time_buffer[i] / N;
-                sample += stage_data.overlap_right[i];
-                out[2*i+1] += sample;
-                stage_data.overlap_right[i] = stage_data.time_buffer[i + B] / N;
-            }
-
-            // 8️⃣ Advance circular index
-            stage_data.write_index = (stage_data.write_index + 1) % P;
         }
-
-
-    } else if (data->use_mono) { // Mono output with no processing
+    }
+    
+    // Playback: either mono or stereo output depending on settings
+    if (data->use_mono) {
         for (size_t i = 0; i < to_process; ++i) {
             float s = data->mono[data->playhead++];
             *out++ = s; 
             *out++ = s;
         }
-    } else { // Stereo output with no processing
+    } else {
         for (size_t i = 0; i < to_process; ++i) {
             *out++ = data->left[data->playhead];
             *out++ = data->right[data->playhead++];
@@ -137,8 +116,10 @@ int play_audio(AudioData& audio_data) {
     std::cout << "Playing... Press Enter to quit." << std::endl;
     std::cin.get(); // Keep program alive while audio plays
 
-    dac.stopStream();
-    dac.closeStream();
+    if (dac.isStreamOpen()) {
+        if (dac.isStreamRunning()) dac.stopStream();
+        dac.closeStream(); // This blocks until the audio thread is safely shut down
+    }
 
     return 0;
 }

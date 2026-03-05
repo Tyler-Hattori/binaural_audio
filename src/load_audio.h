@@ -8,26 +8,24 @@ std::vector<float> convert_to_mono(const std::vector<float>& left, const std::ve
 
 // Runtime data for each stage
 struct StageData {
-    int write_index = 0; // Index for writing incoming audio blocks
-    int period;         // How many blocks of the smallest stage fit into this stage's block size
-    int counter = 0;    // Counter to track when to process this stage
-    int block_size;     // Block size for this stage
-    int fft_size;       // FFT size for this stage
-    int bins;           // Number of frequency bins (fft_size/2 + 1)
-    int num_partitions; // Number of partitions in the BRIR for this stage
+    int sample_counter = 0;  // Counter to track when to process this stage
+    int block_size;          // Block size for this stage
+    int fft_size;            // FFT size for this stage
+    int bins;                // Number of frequency bins (fft_size/2 + 1)
+    int num_partitions;      // Number of partitions in the BRIR for this stage
+
+    float* x;                       // For FFT input (size = fft_size)
+    fftwf_complex* X;         // For FFT output (size = fft_size)
+    fftwf_complex* Y_left;    // [bin]
+    fftwf_complex* Y_right;   // [bin]
+    float* overlap_left;      // For overlap-add IFFT output (size = block_size)
+    float* overlap_right;
 
     std::vector<std::vector<std::complex<float>>> X_history;    // [partition][bin]
-    std::vector<std::complex<float>> Y_left;                    // [bin]
-    std::vector<std::complex<float>> Y_right;                   // [bin]
-
-    std::vector<float> fft_input;     // For FFT input (size = fft_size)
-    std::vector<float> ifft_output;   // For IFFT output (size = fft_size)
-
-    std::vector<float> overlap_left;    // For overlap-add output (size = block_size)
-    std::vector<float> overlap_right;
 
     fftwf_plan fft_plan;
-    fftwf_plan ifft_plan;
+    fftwf_plan ifft_plan_left;
+    fftwf_plan ifft_plan_right;
 };
 
 struct AudioData {
