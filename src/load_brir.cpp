@@ -38,30 +38,36 @@ struct SofaLoader {
         if (sofa->DataSamplingRate.values) sample_rate = (int)sofa->DataSamplingRate.values[0];
         else sample_rate = 44100; // Fallback
         
-        std::cout << "Manual Load Success. Filter length: " << filter_length << ". Sample rate: " << sample_rate << " Hz\n";
+        std::cout << "Loaded " << measurement_count << " BRIRs. Filter lengths: " << filter_length << ". Sample rate: " << sample_rate << " Hz.\n" << std::endl;
         return true;
     }
 
-    int find_nearest_index(float target_az, float target_el) {
-        int best_idx = 0;
-        float min_dist = 1e10;
+    std::tuple<int, int, float> find_closest_indices(float target_az, float target_el) {
+        int nearest_idx = 0;
+        int second_nearest_idx = 0;
+        float smallest_dist = 1e10;
+        float second_smallest_dist = 1e10;
         int C = sofa->C;
 
         for (int i = 0; i < measurement_count; ++i) {
-            float az = sofa->SourcePosition.values[i * C];
+            float az = sofa->SourcePosition.values[i * C + 0];
             float el = sofa->SourcePosition.values[i * C + 1];
-
-            // Simple Euclidean distance for angles
-            float d_az = az - target_az;
-            float d_el = el - target_el;
-            float dist = d_az * d_az + d_el * d_el;
-
-            if (dist < min_dist) {
-                min_dist = dist;
-                best_idx = i;
+            float dist = std::sqrt(std::pow(az - target_az, 2) + std::pow(el - target_el, 2));
+            if (dist < smallest_dist) {
+                second_smallest_dist = smallest_dist;
+                second_nearest_idx = nearest_idx;
+                smallest_dist = dist;
+                nearest_idx = i;
+            } else if (dist < second_smallest_dist) {
+                second_smallest_dist = dist;
+                second_nearest_idx = i;
             }
         }
-        return best_idx;
+
+        float interpolation_factor = smallest_dist / (smallest_dist + second_smallest_dist);
+
+        // For simplicity, we'll just return the nearest measurement index for both low and high (no interpolation)
+        return std::make_tuple(nearest_idx, second_nearest_idx, interpolation_factor);
     }
 
     void close() {
@@ -70,24 +76,32 @@ struct SofaLoader {
 };
 
 void get_IR(SofaLoader& loader, float azimuth, float elevation, vector<float>& left, vector<float>& right) {
-    int nearest = loader.find_nearest_index(azimuth, elevation);
+    auto [nearest_idx, second_nearest_idx, interp_factor] = loader.find_closest_indices(azimuth, elevation);
     int n = loader.filter_length;
-    int receiver_count = loader.sofa->R; 
+    int receiver_count = loader.sofa->R;
+
+    // Get IR data for nearest and second nearest measurements
     float* ir_data = loader.sofa->DataIR.values;
-
     if (!ir_data) return;
+    int base_idx_nearest = nearest_idx * receiver_count * n;
+    int base_idx_second = second_nearest_idx * receiver_count * n;
 
-    int base_idx = nearest * receiver_count * n;
+    left.assign(n, 0.0f);
+    right.assign(n, 0.0f);
 
-    // Direct Copy for Left Channel
-    left.assign(ir_data + base_idx, ir_data + base_idx + n);
+    for (int i = 0; i < n; ++i) {
+        float nearest_left = ir_data[base_idx_nearest + i];
+        float nearest_right = (receiver_count > 1) ? ir_data[base_idx_nearest + n + i] : nearest_left;
+        float second_left = ir_data[base_idx_second + i];
+        float second_right = (receiver_count > 1) ? ir_data[base_idx_second + n + i] : second_left;
 
-    // Direct Copy for Right Channel
-    if (receiver_count > 1) right.assign(ir_data + base_idx + n, ir_data + base_idx + 2 * n);
-    else right = left;
+        // Linear interpolation between the two nearest measurements
+        left[i] = nearest_left * (1 - interp_factor) + second_left * interp_factor;
+        right[i] = nearest_right * (1 - interp_factor) + second_right * interp_factor;
+    }
 }
 
-PartitionedIR create_stage(const vector<float>& ir, vector<int> block_sizes) {
+PartitionedIR partition_IR(const vector<float>& ir, vector<int> block_sizes, bool verbose) {
     // Check if ir.size() < sum(block_sizes) and update block_sizes if necessary
     if (ir.size() < std::accumulate(block_sizes.begin(), block_sizes.end(), 0)) {
         // Update block_sizes to fit ir.size()
@@ -104,9 +118,11 @@ PartitionedIR create_stage(const vector<float>& ir, vector<int> block_sizes) {
         std::sort(block_sizes.begin(), block_sizes.end());
 
         // Print block sizes update
-        std::cout << "Updated block sizes to fit IR length: ";
-        for (int i = 0; i < block_sizes.size(); ++i) std::cout << block_sizes[i] << " ";
-        std::cout << "\n\n";
+        if (verbose) {
+            std::cout << "Updated block sizes to fit IR length: ";
+            for (int i = 0; i < block_sizes.size(); ++i) std::cout << block_sizes[i] << " ";
+            std::cout << "\n\n";
+        }
     } else if (ir.size() > std::accumulate(block_sizes.begin(), block_sizes.end(), 0)) {
         // Add an extra block to cover remaining IR samples
         int remaining = ir.size() - std::accumulate(block_sizes.begin(), block_sizes.end(), 0);
@@ -117,14 +133,16 @@ PartitionedIR create_stage(const vector<float>& ir, vector<int> block_sizes) {
         // Sort block sizes so the smallest block is first (important for runtime processing)
         std::sort(block_sizes.begin(), block_sizes.end());
 
-        std::cout << "Added extra block to cover remaining IR samples. New block sizes: ";
-        for (int i = 0; i < block_sizes.size(); ++i) std::cout << block_sizes[i] << " ";
-        std::cout << "\n";
-        std::cout << "Zero-padded the impulse response to " << ir.size() + (next_pow2 - remaining) << " samples to account for the last block.\n\n";
+        if (verbose) {
+            std::cout << "Added extra block to cover remaining IR samples. New block sizes: ";
+            for (int i = 0; i < block_sizes.size(); ++i) std::cout << block_sizes[i] << " ";
+            std::cout << "\n";
+            std::cout << "Zero-padded the impulse response to " << ir.size() + (next_pow2 - remaining) << " samples to account for the last block.\n\n";
+        }
         // Zero-pad IR to match total block size
         vector<float> padded_ir = ir;
         padded_ir.resize(padded_ir.size() + (next_pow2 - remaining), 0.0f);
-        return create_stage(padded_ir, block_sizes); // Recurse with padded IR and updated block sizes
+        return partition_IR(padded_ir, block_sizes, verbose); // Recurse with padded IR and updated block sizes
     }
 
     // The number of stages is determined by the number of unique block sizes
@@ -140,11 +158,13 @@ PartitionedIR create_stage(const vector<float>& ir, vector<int> block_sizes) {
         }
     }
     // Print stage and partition info
-    std::cout << "Stage block sizes and partition counts:\n";
-    for (size_t i = 0; i < stage_block_sizes.size(); ++i) {
-        std::cout << "Stage " << i << ": Block size = " << stage_block_sizes[i] << ", Partitions = " << num_partitions[i] << "\n";
+    if (verbose) {
+        std::cout << "Stage block sizes and partition counts:\n";
+        for (size_t i = 0; i < stage_block_sizes.size(); ++i) {
+            std::cout << "Stage " << i << ": Block size = " << stage_block_sizes[i] << ", Partitions = " << num_partitions[i] << "\n";
+        }
+        std::cout << "\n";
     }
-    std::cout << "\n";
 
     // Partition the IR into
     int start = 0; // Index to track where we are in the IR
@@ -180,7 +200,7 @@ PartitionedIR create_stage(const vector<float>& ir, vector<int> block_sizes) {
     return pir;
 }
 
-BRIR get_BRIR(string sofa_path, float azimuth, float elevation, vector<int> block_sizes) {
+BRIR get_BRIR(string sofa_path, float azimuth, float elevation, vector<int> block_sizes, bool verbose) {
     SofaLoader loader;
     if (!loader.load(sofa_path)) {
         std::cout << "Failed to load SOFA file. Returning empty BRIR.\n";
@@ -190,16 +210,16 @@ BRIR get_BRIR(string sofa_path, float azimuth, float elevation, vector<int> bloc
     vector<float> left_ir, right_ir;
     get_IR(loader, azimuth, elevation, left_ir, right_ir);
 
-    std::cout << "\nRequested block sizes: ";
-    for (int size : block_sizes) {
-        std::cout << size << " ";
+    if (verbose) {
+        std::cout << "\nRequested block sizes: ";
+        for (int size : block_sizes) std::cout << size << " ";
+        if (verbose) std::cout << "\n\n";
     }
-    std::cout << "\n\n";
 
-    std::cout << "Left IR length: " << left_ir.size() << "\n";
-    PartitionedIR left_stage = create_stage(left_ir, block_sizes);
-    std::cout << "Right IR length: " << right_ir.size() << "\n";
-    PartitionedIR right_stage = create_stage(right_ir, block_sizes);
+    if (verbose) std::cout << "Left IR length: " << left_ir.size() << "\n";
+    PartitionedIR left_stage = partition_IR(left_ir, block_sizes, verbose);
+    if (verbose) std::cout << "Right IR length: " << right_ir.size() << "\n";
+    PartitionedIR right_stage = partition_IR(right_ir, block_sizes, verbose);
 
     BRIR brir;
     brir.left = left_stage;
@@ -207,4 +227,50 @@ BRIR get_BRIR(string sofa_path, float azimuth, float elevation, vector<int> bloc
 
     loader.close();
     return brir;
+}
+
+SofaBRIRData get_all_BRIR_data(string sofa_path) {
+    SofaLoader loader;
+    if (!loader.load(sofa_path)) {
+        std::cout << "Failed to load SOFA file. Returning empty BRIR.\n";
+        return SofaBRIRData();
+    }
+
+    SofaBRIRData data;
+
+    int M = loader.sofa->M;
+    int N = loader.filter_length;
+    data.filter_length = N;
+    data.num_measurements = M;
+    
+    // Extract the left and right IRs from the interleaved sofa data
+    std::vector<float> left;
+    std::vector<float> right;
+    left.assign(N * M, 0.0f);
+    right.assign(N * M, 0.0f);
+    float* ir_data = loader.sofa->DataIR.values;
+    for (int m = 0; m < M; ++m) {
+        for (int i = 0; i < N; ++i) {
+            left[m * N + i] = ir_data[2 * m * N + i];
+            right[m * N + i] = ir_data[2 * m * N + N + i];
+        }
+    }
+    data.left_irs = left;
+    data.right_irs = right;
+
+    // Store the az and el angles and rhos corresponding to the IR measurements
+    vector<float> azimuths(M);
+    vector<float> elevations(M);
+    vector<float> rhos(M);
+    int C = loader.sofa->C;
+    for (int i = 0; i < M; ++i) {
+        azimuths[i] = loader.sofa->SourcePosition.values[i * C];
+        elevations[i] = loader.sofa->SourcePosition.values[i * C + 1];
+        rhos[i] = loader.sofa->SourcePosition.values[i * C + 2];
+    }
+    data.azimuths = azimuths;
+    data.elevations = elevations;
+    data.rhos = rhos;
+
+    return data;
 }

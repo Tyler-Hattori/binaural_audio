@@ -7,6 +7,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/binaural.dir/src/main.cpp.o.d"
   "CMakeFiles/binaural.dir/src/play_audio.cpp.o"
   "CMakeFiles/binaural.dir/src/play_audio.cpp.o.d"
+  "CMakeFiles/binaural.dir/src/save_audio.cpp.o"
+  "CMakeFiles/binaural.dir/src/save_audio.cpp.o.d"
   "binaural"
   "binaural.pdb"
 )

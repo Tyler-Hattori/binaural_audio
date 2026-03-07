@@ -12,6 +12,7 @@ endif()
 # Find packages
 find_package(PkgConfig REQUIRED)
 find_package(SndFile REQUIRED)
+find_package(yaml-cpp REQUIRED)
 pkg_check_modules(MYSOFA REQUIRED IMPORTED_TARGET libmysofa)
 pkg_check_modules(FFTW3 REQUIRED IMPORTED_TARGET fftw3f)
 pkg_check_modules(RTAUDIO REQUIRED IMPORTED_TARGET rtaudio)
@@ -32,6 +33,7 @@ target_link_libraries(binaural PRIVATE
     PkgConfig::FFTW3
     SndFile::sndfile
     PkgConfig::RTAUDIO
+    yaml-cpp::yaml-cpp
 )
 
 # macOS rpath fix

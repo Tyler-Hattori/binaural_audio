@@ -1,0 +1,16 @@
+azimuth: 110.0    # azimuth angle for initial position in degrees [0,360)
+elevation: 0.0   # elevation angle for initial position in degrees [-40, 90)
+distance: 2.5    # initial distance in meters
+velocity:
+  type: "polar"  # format of velocity (cartesian or polar)
+  x: 0.0   # m/s (only used if type is cartesian)
+  y: 0.0   # m/s (only used if type is cartesian)
+  z: 0.0   # m/s (only used if type is cartesian)
+  az: -10.0   # degrees/s (only used if type is polar)
+  el: 0.0   # degrees/s (only used if type is polar)
+  rho: -0.1   # m/s (only used if type is polar)
+block_sizes: [64, 64, 64, 128]   # block sizes for each processing stage
+sofa_path: "/Users/tyler/Documents/asp projects/binaural_audio/data/mit_kemar_normal_pinna.sofa"
+audio_file: "/Users/tyler/Documents/asp projects/binaural_audio/data/fairest_of_the_seasons_short.wav"
+save_output: true   # whether to save the output audio to a file
+save_folder: "/Users/tyler/Documents/asp projects/binaural_audio/results"   # folder to save output audio files (if save_output is true)

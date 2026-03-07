@@ -1,0 +1,2 @@
+bool save_audio_file(const std::string& filepath, const std::vector<float>& audio, int sample_rate, int channels);
+bool save_stereo_wav(const std::string& filepath, const std::vector<float>& audio_left, const std::vector<float>& audio_right, int sample_rate, int channels);

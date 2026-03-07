@@ -249,6 +249,9 @@ pkgcfg_lib_MYSOFA_mysofa:FILEPATH=/usr/local/lib/libmysofa.dylib
 //Path to a library.
 pkgcfg_lib_RTAUDIO_rtaudio:FILEPATH=/opt/homebrew/Cellar/rtaudio/6.0.1/lib/librtaudio.dylib
 
+//The directory containing a CMake configuration file for yaml-cpp.
+yaml-cpp_DIR:PATH=/opt/homebrew/lib/cmake/yaml-cpp
+
 
 ########################
 # INTERNAL cache entries

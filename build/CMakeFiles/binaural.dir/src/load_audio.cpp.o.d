@@ -819,6 +819,10 @@ CMakeFiles/binaural.dir/src/load_audio.cpp.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__bit/has_single_bit.h \
   /Users/tyler/Documents/asp\ projects/binaural_audio/src/load_audio.h \
   /Users/tyler/Documents/asp\ projects/binaural_audio/src/load_brir.h \
+  /usr/local/include/mysofa.h \
+  /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/stdbool.h \
+  /Library/Developer/CommandLineTools/usr/lib/clang/17/include/stdbool.h \
+  /usr/local/include/mysofa_export.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/comparison.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__fwd/vector.h \

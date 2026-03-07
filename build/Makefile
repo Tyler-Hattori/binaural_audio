@@ -225,6 +225,30 @@ src/play_audio.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/binaural.dir/build.make CMakeFiles/binaural.dir/src/play_audio.cpp.s
 .PHONY : src/play_audio.cpp.s
 
+src/save_audio.o: src/save_audio.cpp.o
+.PHONY : src/save_audio.o
+
+# target to build an object file
+src/save_audio.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/binaural.dir/build.make CMakeFiles/binaural.dir/src/save_audio.cpp.o
+.PHONY : src/save_audio.cpp.o
+
+src/save_audio.i: src/save_audio.cpp.i
+.PHONY : src/save_audio.i
+
+# target to preprocess a source file
+src/save_audio.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/binaural.dir/build.make CMakeFiles/binaural.dir/src/save_audio.cpp.i
+.PHONY : src/save_audio.cpp.i
+
+src/save_audio.s: src/save_audio.cpp.s
+.PHONY : src/save_audio.s
+
+# target to generate assembly for a file
+src/save_audio.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/binaural.dir/build.make CMakeFiles/binaural.dir/src/save_audio.cpp.s
+.PHONY : src/save_audio.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -246,6 +270,9 @@ help:
 	@echo "... src/play_audio.o"
 	@echo "... src/play_audio.i"
 	@echo "... src/play_audio.s"
+	@echo "... src/save_audio.o"
+	@echo "... src/save_audio.i"
+	@echo "... src/save_audio.s"
 .PHONY : help
 
 
